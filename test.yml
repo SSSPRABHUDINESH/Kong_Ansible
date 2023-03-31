@@ -1,0 +1,9 @@
+---
+- name: Test_run
+  become: true
+  hosts: webservers
+  tasks:
+    - name: Run ping
+      command: "ping -c 2 google.com"
+    - name: Apt update
+      command: "sudo apt update"
