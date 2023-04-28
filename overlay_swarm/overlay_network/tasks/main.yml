@@ -1,0 +1,57 @@
+---
+# tasks file for overlay_network
+
+# Installing firewall package provides a host-based firewall
+  - name: Install firewall package
+    apt:
+      name: firewalld
+      state: latest
+
+
+# Set up firewall rules for Docker overlay network ports
+  - name: Open Docker overlay network ports
+    firewalld:
+      port: "{{ item }}"
+      permanent: yes
+      state: enabled
+      zone: public
+    with_items: "{{ docker_overlay_ports }}"
+
+
+# Intializing swarm for overlay network
+  - name: Init a new swarm with default parameters
+    community.docker.docker_swarm:
+      state: present
+    when: inventory_hostname == groups['webservers'][0]
+
+  - name: Get the worker join-token
+    shell: docker swarm join-token --quiet worker
+    when: inventory_hostname == groups['webservers'][0]
+    register: worker_token
+
+
+  - name: Add nodes
+    community.docker.docker_swarm:
+      state: join
+      timeout: 60
+      join_token: "{{ hostvars[groups['webservers'][0]]['worker_token']['stdout'] }}"
+      remote_addrs: "{{ hostvars[groups['webservers'][0]]['ansible_default_ipv4']['address'] }}:2377"
+    when: inventory_hostname != groups['webservers'][0]
+
+
+# Create user-defined overlay network
+  - name: User-defined swarm overlay network
+    community.docker.docker_network:
+      name: kong-net1
+      state: present
+      attachable: true
+      driver: overlay
+      scope: swarm
+    when: inventory_hostname == groups['webservers'][0]
+
+
+  - name: Restart Docker service
+    service:
+      name: docker
+      state: restarted
+

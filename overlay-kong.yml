@@ -1,0 +1,125 @@
+---
+- name: Deploying Kong
+  become: true
+  hosts: webservers
+
+  vars:
+    # Define the necessary ports for Docker overlay networks
+    docker_overlay_ports:
+      - 2377/tcp
+      - 7946/tcp
+      - 7946/udp
+      - 4789/udp
+
+  tasks:
+    - name: Apt update
+      command: "sudo apt update"
+
+    - name: Install Python Dependencies
+      apt:
+        name: software-properties-common
+        state: present
+
+    - name: Install Python3
+      apt:
+        name: python3
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Install Docker Compose
+      apt:
+        name: docker-compose
+        state: present
+
+    - name: Install firewall package
+      apt:
+        name: firewalld
+        state: latest
+
+
+    # Set up firewall rules for Docker overlay network ports
+    - name: Open Docker overlay network ports
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+        zone: public
+      with_items: "{{ docker_overlay_ports }}"
+
+    # Initialize Docker swarm manager on the first node
+    - name: Initialize Docker swarm manager
+      command: docker swarm init
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: Docker token for worker
+      command: docker swarm join-token -q worker
+      register: token_output
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: token_output
+      debug:
+        msg: "{{ token_output.stdout }}"
+
+    - name: token value
+      set_fact:
+        token_fin: "{{ token_output.stdout | regex_search(regexp) }}"
+      vars:
+        regexp: '"[^"]*"'
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: Token
+      debug:
+        var: token_fin
+      when: inventory_hostname == groups['webservers'][0]
+
+    # Stores manager node ip address in register
+    - name: Manager node IP address
+      shell:
+        cmd: |
+             docker node inspect self |
+             grep -oP '(?<="Addr": ")[^"]*' |
+             tail -n 1
+      register: manager_ip_address
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: IP value
+      set_fact:
+        ip_fin: "{{ manager_ip_address.stdout | regex_search(regexp,'\\2') }}"
+      vars:
+        regexp: 'value=\"([^"]+)'
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: IP
+      debug:
+        var: ip_fin
+      when: inventory_hostname == groups['webservers'][0]
+
+    # Join Docker swarm worker nodes to the manager node
+    - name: Join Docker swarm worker nodes
+      command: docker swarm join --token {{ swarm_token }} {{ swarm_manager }}
+#      command: docker swarm join --token SWMTKN-1-38wveq5icikgw2spwk57dtsz7grvot10a5zwrfd8vt2pfs3vaa-86ae78hmhe99vioamrwamgiw2 10.128.0.2:2377
+      when: inventory_hostname != groups['webservers'][0]
+      vars:
+        #swarm_token: "{{ hostvars[groups['webservers'][0]].swarm_token }}"
+        #swarm_manager: "{{ hostvars[groups['webservers'][0]]['ansible_default_ipv4']['address'] }}:2377"
+        swarm_token: '{{ token_output.stdout }}'
+        swarm_manager: '{{ manager_ip_address.stdout }}'
+
+
+    # Create user-defined overlay network
+    - name: Create user-defined overlay network
+      command: docker network create --driver=overlay --scope=swarm --attachable kong-net1
+      args:
+        creates: kong-net1
+
+    - name: Running an apline image on container in test-kong1
+      command: docker run -it --name alpine10 --network kong-net1 alpine
+      when: inventory_hostname == groups['webservers'][0]
+
+    - name: Running an apline image on container in test-postgress
+      command: docker run -it --name alpine10 --network kong-net1 alpine
+      when: inventory_hostname != groups['webservers'][0]

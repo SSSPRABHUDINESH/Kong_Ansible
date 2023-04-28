@@ -1,0 +1,30 @@
+---
+# tasks file for requirements
+
+# Updating apt package installer
+  - name: Apt update
+    command: "sudo apt update"
+
+# Installing Python dependencies
+  - name: Install Python Dependencies
+    apt:
+      name: software-properties-common
+      state: present
+
+# Installing Python3 package
+  - name: Install Python3
+    apt:
+      name: python3
+      state: present
+
+# Installing Docker
+  - name: Install Docker
+    apt:
+      name: docker.io
+      state: present
+
+# Installing Docker Compose
+  - name: Install Docker Compose
+    apt:
+      name: docker-compose
+      state: present

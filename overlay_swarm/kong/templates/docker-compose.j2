@@ -1,0 +1,147 @@
+
+version: "3.9"
+secrets:
+  kongtestpwd:
+    file: ./kongtestpwd.txt
+  kongtestlic:
+    file: ./kongtestlic.txt
+services:
+  #######################################
+  # Postgres: The database used by Kong
+  #######################################
+  kong-database:
+    image: postgres:14
+    secrets:
+      - kongtestpwd
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgres == yes
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - /home/opc/postgres:/usr/data
+    networks:
+      - kong-net1
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_DB: kong
+      POSTGRES_PASSWORD: /run/secrets/kongtestpwd
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  #######################################
+  # Kong database migration
+  #######################################
+  kong-migration:
+    image: kong/kong-gateway:3.0.2.0-debian
+    secrets:
+      - kongtestpwd
+    command: "kong migrations bootstrap"
+    deploy:
+      placement:
+        constraints:
+          - node.labels.kong == yes
+      restart_policy:
+        condition: on-failure
+    networks:
+      - kong-net1
+    environment:
+      KONG_PG_HOST: 34.69.49.141
+      KONG_DATABASE: postgres
+      KONG_PG_PASSWORD: /run/secrets/kongtestpwd
+      KONG_PG_DATABASE: kong
+      KONG_PG_USER: kong
+    depends_on:
+      - kong-database
+
+  #######################################
+  # Kong Control Plane: The API Gateway
+  #######################################
+  kong-controlplane:
+    image: kong/kong-gateway:3.0.2.0-debian
+    secrets:
+      - kongtestpwd
+      - kongtestlic
+    deploy:
+      placement:
+        constraints:
+          - node.labels.kong == yes
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - /cert:/cert
+    networks:
+      - kong-net1
+    environment:
+      KONG_ROLE: control_plane
+      KONG_CLUSTER_CERT: /cert/cluster.crt
+      KONG_CLUSTER_CERT_KEY: /cert/cluster.key
+      lua_ssl_trusted_certificate: /cert/cluster.crt
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: 34.69.49.141
+      KONG_PG_USER: kong
+      KONG_PROXY_LISTEN: "off"
+      KONG_STREAM_LISTEN: "off"
+      KONG_PG_PASSWORD: /run/secrets/kongtestpwd
+      KONG_PG_DATABASE: kong
+      KONG_ADMIN_GUI_URL: http://10.143.4.53:8002
+      KONG_LICENSE_DATA: /run/secrets/kongtestlic
+    depends_on:
+      - kong-migration
+      - kong-database
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    ports:
+      - "8001:8001"
+      - "8444:8444"
+      - "8002:8002"
+      - "8445:8445"
+      - "8003:8003"
+      - "8004:8004"
+
+ #######################################
+  # Kong Data Plane: The API Gateway
+  #######################################
+  kong-dataplane:
+    image: kong/kong-gateway:3.0.2.0-debian
+    deploy:
+      placement:
+        constraints:
+          - node.labels.kong == yes
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - /cert:/cert
+    networks:
+      - kong-net1
+    environment:
+      KONG_ROLE: data_plane
+      KONG_DATABASE: "off"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_PROXY_LISTEN_SSL: 0.0.0.0:8443
+      KONG_CLUSTER_CERT: /cert/cluster.crt
+      KONG_CLUSTER_CERT_KEY: /cert/cluster.key
+      lua_ssl_trusted_certificate: /cert/cluster.crt
+    depends_on:
+      - kong-controlplane
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8005:8005"
+      - "8006:8006"
+
+networks:
+  kong-net1:
+    external: true

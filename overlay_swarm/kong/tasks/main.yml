@@ -1,0 +1,65 @@
+---
+# tasks file for kong
+
+  - name: Add label to Docker node test-kong1
+    docker_node:
+      hostname: test-kong1
+      labels:
+        kong: "yes"
+    when: inventory_hostname == groups['webservers'][0]
+
+
+  - name: Add label to Docker node test-postgres
+    docker_node:
+      hostname: test-postgres
+      labels:
+        postgres: "yes"
+    when: inventory_hostname == groups['webservers'][0]
+
+
+  - name: Render Docker Compose file
+    template:
+      src: docker-compose.j2
+      dest: /tmp/docker-compose.yml
+    when: inventory_hostname == groups['webservers'][0]
+
+  - name: APt package update
+    command: "sudo apt-get update -y"
+    when: inventory_hostname == groups['webservers'][0]
+
+  - name: Installing docker stack dependency
+    command: "sudo apt-get install -y python3-jsondiff"
+    when: inventory_hostname == groups['webservers'][0]
+
+  - name: Copy kongpwd to remote nodes
+    copy:
+      src: /tmp/kongtestpwd.txt
+      dest: /tmp/kongtestpwd.txt
+
+  - name: Copy konglic to remote nodes
+    copy:
+      src: /tmp/kongtestlic.txt
+      dest: /tmp/kongtestlic.txt
+
+  - name: Creating volume for database
+    file:
+      path: /home/opc/postgres
+      state: directory
+      mode: '0755'
+      recurse: yes
+
+  - name: Creating volume for certificates
+    file:
+      path: /cert
+      state: directory
+      mode: '0755'
+      recurse: yes
+
+
+  - name: Deploy stack from a compose file
+    community.docker.docker_stack:
+      state: present
+      name: mystack
+      compose:
+        - /tmp/docker-compose.yml
+    when: inventory_hostname == groups['webservers'][0]
